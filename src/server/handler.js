@@ -6,6 +6,7 @@ const pool = require('../server/db');
 // const { image } = require("@tensorflow/tfjs-node");
 const scarClassification = require('../services/inferenceService')
 const loadModel = require("../services/loadModel");
+const { model } = require("@tensorflow/tfjs-node");
 
 const skinDiseases = {
     'BA-cellulitis': 0, 
@@ -13,10 +14,10 @@ const skinDiseases = {
     'FU-athlete-foot': 2, 
     'FU-nail-fungus': 3, 
     'FU-ringworm': 4, 
-    'Luka': 5, 
-    'PA-cutaneous-larva-migrans': 6, 
-    'VI-chickenpox': 7, 
-    'VI-shingles': 8
+    'PA-cutaneous-larva-migrans': 5, 
+    'VI-chickenpox': 6, 
+    'VI-shingles': 7, 
+    'Luka': 8
 }
 
 async function postUserHandler(request, h) {
@@ -47,10 +48,9 @@ async function postRegisterHandler(request, h){
     const {email, password, full_name, date_of_birth, gender} = request.payload;
 
     const id = crypto.randomUUID();
-    const createdAt = new Date().toISOString();
+    const createdAt = new Date();
     const user_id = "U" + id;
     const hashedPassword = await bcrypt.hash(password, 10);
-
     // const newUser = {
     //     user_id, email, full_name, hashedPassword, date_of_birth, gender, createdAt
     // }
@@ -66,7 +66,7 @@ async function postRegisterHandler(request, h){
 
     await pool.execute(
         'INSERT INTO users (user_id, email, full_name, password, date_of_birth, gender, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)', 
-        [user_id, email, full_name, hashedPassword, date_of_birth, gender, createdAt]
+        [user_id, email, full_name, hashedPassword, date_of_birth, gender, addHours(createdAt, 7).toISOString().split('T')[0]]
     );
     // const isValid = await bcrypt.compare(password, hashedPassword);
     return h.response({ message: 'User registered successfully'}).code(201);
@@ -111,13 +111,26 @@ async function skinDetection(request, h){
 
     // const { label, suggestion } = await scarClassification(model, image);
     const result = await scarClassification(skin_model, image)
-
+    // const modelSummary = generateModelSummary(skin_model);
     const disease = Object.keys(skinDiseases);
     return h.response({
         // score: score,
-        result: disease[result]
+        result: disease[result],
+        // summary: modelSummary
     }).code(200);
 }
+
+// function generateModelSummary(model) {
+//     const summary = [];
+//     model.layers.forEach(layer => {
+//         summary.push({
+//             name: layer.name,
+//             outputShape: layer.outputShape,
+//             numberOfParams: layer.countParams()
+//         });
+//     });
+//     return summary;
+// }
 
 async function postSugarBlood(request, h){
     const {check_date, check_time, blood_sugar} = request.payload;

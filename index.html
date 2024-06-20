@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Model Summary Example</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+</head>
+<body>
+    <script>
+        async function loadModel() {
+            const model = await tf.loadLayersModel('file://graph_model/model.json');
+            return model;
+        }
+
+        async function printModelSummary() {
+            const model = await loadModel();
+            model.summary(); // Print the model summary to the console
+        }
+
+        // Call the function to load the model and print the summary
+        printModelSummary();
+    </script>
+</body>
+</html>

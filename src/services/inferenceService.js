@@ -4,12 +4,20 @@ const InputError = require("../exceptions/InputError");
 async function scarClassification(model, image) {
     try {
         const tensor = tf.node
-            .decodeJpeg(image)
+            .decodeImage(image)
             .resizeNearestNeighbor([224, 224])
             .expandDims()
-            .toFloat();
+            .toFloat()
+            .div(tf.scalar(255.0));
 
         const prediction = model.predict(tensor);
+
+        // const tensor = tf.browser.fromPixels(image);
+        // const resizedImg = tf.image.resizeBilinear(tensor, [224, 224]); 
+        // const normalizedImg = resizedImg.div(255.0);
+        // const expandedimg = normalizedImg.expandDims();
+        // const prediction = model.predict(expandedimg);
+
         const score = await prediction.data();
         // const confidenceScore = Math.max(...score) * 100;
 
@@ -34,7 +42,6 @@ async function scarClassification(model, image) {
                 maxKey = key;
             }
         }
-
         return maxKey;
     } catch (error) {
         throw new InputError(`Terjadi kesalahan input: ${error.message}`);
