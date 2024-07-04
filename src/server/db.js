@@ -2,9 +2,9 @@ const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
 
 dotenv.config();
-
+// console.log(`USE_CLOUD_SQL: ${process.env.USE_CLOUD_SQL}`);
 const useCloudSQL = process.env.USE_CLOUD_SQL === 'true';
-
+// console.log(`USE_CLOUD_SQL: ${useCloudSQL}`);
 const poolConfig = useCloudSQL ? {
     host: process.env.CLOUD_DB_HOST,
     user: process.env.CLOUD_DB_USER,
@@ -34,7 +34,7 @@ const testDbConnection = async () => {
         console.log('Database connection successful!');
         connection.release();
     } catch (error) {
-        console.error('Database connection failed:', error.message);
+        console.error('Database connection failed:', error.message, poolConfig);
     }
 };
 

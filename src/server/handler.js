@@ -4,9 +4,9 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../server/db');
 // const { image } = require("@tensorflow/tfjs-node");
-const scarClassification = require('../services/inferenceService')
-const loadModel = require("../services/loadModel");
-const { model } = require("@tensorflow/tfjs-node");
+const {scarClassification, acneClassification} = require('../services/inferenceService')
+const uploadFileToGCS = require('./storage.js');
+// const loadModel = require("../services/loadModel");
 
 const skinDiseases = {
     'BA-cellulitis': 0, 
@@ -14,10 +14,10 @@ const skinDiseases = {
     'FU-athlete-foot': 2, 
     'FU-nail-fungus': 3, 
     'FU-ringworm': 4, 
-    'PA-cutaneous-larva-migrans': 5, 
+    'cutaneous-larva-migrans': 5, 
     'VI-chickenpox': 6, 
     'VI-shingles': 7, 
-    'Luka': 8
+    'Scar': 8
 }
 
 async function postUserHandler(request, h) {
@@ -35,9 +35,13 @@ async function postUserHandler(request, h) {
         return h.response({ error: 'Invalid password', hash: user.password, password: password }).code(401);
     }
 
-    const token = jwt.sign({ user_id: user.user_id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    const token = jwt.sign({ user_id: user.user_id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
-    return h.response({ message: 'Login successful', token }).code(200);
+    return h.response({error: false, message: 'Login successful', loginResult: {
+        userId: user.user_id,
+        name: user.full_name,
+        token: token
+    } }).code(200);
     } catch (error) {
         console.error('Error during login:', error); // Log the detailed error
         return h.response({ error: 'Internal Server Error', details: error.message }).code(500);
@@ -48,17 +52,26 @@ async function postRegisterHandler(request, h){
     const {email, password, full_name, date_of_birth, gender} = request.payload;
 
     const id = crypto.randomUUID();
-    const createdAt = new Date();
+    const createdAt = new Date().toISOString();
     const user_id = "U" + id;
     const hashedPassword = await bcrypt.hash(password, 10);
-    // const newUser = {
-    //     user_id, email, full_name, hashedPassword, date_of_birth, gender, createdAt
-    // }
+    const inputDate = new Date(createdAt);
+    const formattedDate = inputDate.toISOString().slice(0, 19).replace('T', ' ');
+
+    if (password.length < 8) {
+        const response = h.response({
+            error: true,
+            message: 'Password must be at least 8 characters long'
+        })
+        response.code(400);
+        return response;
+    }
     
     const [rows] = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
     if (rows.length > 0) {
         const response = h.response({
-            error: 'Email already exists',
+            error: true,
+            message: 'Email is already taken'
         })
         response.code(400);
         return response;
@@ -66,23 +79,26 @@ async function postRegisterHandler(request, h){
 
     await pool.execute(
         'INSERT INTO users (user_id, email, full_name, password, date_of_birth, gender, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)', 
-        [user_id, email, full_name, hashedPassword, date_of_birth, gender, addHours(createdAt, 7).toISOString().split('T')[0]]
+        [user_id, email, full_name, hashedPassword, date_of_birth, gender, formattedDate]
     );
     // const isValid = await bcrypt.compare(password, hashedPassword);
-    return h.response({ message: 'User registered successfully'}).code(201);
+    return h.response({ error: false, message: 'User registered successfully'}).code(201);
 }
 
 async function getAllDiseases(request, h){
     const [disease] = await pool.execute('SELECT * FROM diseases');
 
     const simplifiedDiseases = disease.map(disease => ({
-        id: disease.id,
+        id: disease.Id,
         name: disease.name,
-        publisher: disease.description,
+        prevention: disease.prevention,
+        treatment: disease.treatment,
+        description: disease.description,
         imageURL: disease.image
       }));
 
     return h.response({
+        error: false,
         status: "Success",
         data: simplifiedDiseases
     });
@@ -100,10 +116,37 @@ async function getDiseaseDetail(request, h){
     const disease_detail = rows[0];
 
     return h.response({
+        error: false,
         message: 'success',
         data: disease_detail
     }).code(200);
 }
+
+// async function skinDetection(request, h){
+//     const { image } = request.payload;
+//     const { skin_model } = request.server.app;
+//     const imageName = `image_${Date.now()}.png`;
+//     const id = "SD" + crypto.randomUUID();
+//     const user = request.auth.credentials.user;
+
+//     const link = await uploadFileToGCS(image, imageName);
+//     // const { label, suggestion } = await scarClassification(model, image);
+//     const result = await scarClassification(skin_model, image)
+
+//     const disease = Object.keys(skinDiseases);
+    
+//     await pool.execute(
+//         'INSERT INTO historyskin (id, user_id, image, result) VALUES (?, ?, ?, ?)', 
+//         [id, user.user_id, link, disease[result]]
+//     );
+
+
+//     return h.response({
+//         error: false,
+//         result: disease[result],
+//         // link: link
+//     }).code(200);
+// }
 
 async function skinDetection(request, h){
     const { image } = request.payload;
@@ -120,16 +163,78 @@ async function skinDetection(request, h){
     }).code(200);
 }
 
-// function generateModelSummary(model) {
-//     const summary = [];
-//     model.layers.forEach(layer => {
-//         summary.push({
-//             name: layer.name,
-//             outputShape: layer.outputShape,
-//             numberOfParams: layer.countParams()
+// async function getAllSkinDetection(request, h){
+//         const user = request.auth.credentials.user;
+//         const [historySD] = await pool.execute('SELECT * FROM historyskin WHERE user_id = ?', [user.user_id]);
+//         const historySkinDetection = historySD.map(note => ({
+//             id: note.id,
+//             image: note.image,
+//             result: note.result,
+//             createdAt: note.createdAt,
+//           }));
+    
+//         return h.response({
+//             error: false,
+//             status: "Success",
+//             data: historySkinDetection
+//             // user: user,
 //         });
+// }
+
+
+// async function acneDetection(request, h){
+//     try {
+//         const { image } = request.payload;
+//         const { acne_model } = request.server.app;
+//         const imageName = `image_${Date.now()}.png`;
+//         const id = "SD" + crypto.randomUUID();
+//         const user = request.auth.credentials.user;
+
+//         const link = await uploadFileToGCS(image, imageName);
+
+//         const result = await acneClassification(acne_model, image);
+
+//         // Assuming you have a mapping of class indices to disease names
+//         const acneDiseases = [
+//             'Acne', 'Actinic Keratosis', 'Basal Cell Carcinoma', 'Eczemaa', 'Rosacea'
+//         ];
+
+//         const disease = acneDiseases[result.maxKey];
+
+//         await pool.execute(
+//             'INSERT INTO historyacne (id, user_id, image, result) VALUES (?, ?, ?, ?)', 
+//             [id, user.user_id, link, disease]
+//         );
+
+//         return h.response({
+//             error: false,
+//             result: disease,
+//         }).code(200);
+//     } catch (error) {
+//         console.error("Error in acneDetection handler:", error);
+//         return h.response({
+//             status: "fail",
+//             message: error.message
+//         }).code(500);
+//     }
+// }
+
+// async function getAllAcneDetection(request, h){
+//     const user = request.auth.credentials.user;
+//     const [historyAD] = await pool.execute('SELECT * FROM historyacne WHERE user_id = ?', [user.user_id]);
+//     const historyAcneDetection = historyAD.map(note => ({
+//         id: note.id,
+//         image: note.image,
+//         result: note.result,
+//         createdAt: note.createdAt,
+//       }));
+
+//     return h.response({
+//         error: false,
+//         status: "Success",
+//         data: historyAcneDetection
+//         // user: user,
 //     });
-//     return summary;
 // }
 
 async function postSugarBlood(request, h){
@@ -143,7 +248,7 @@ async function postSugarBlood(request, h){
         [id, user.user_id, check_date, check_time, blood_sugar]
     );
 
-    return h.response({ message: 'success', user }).code(200);
+    return h.response({error: false, message: 'success', data: {check_date: check_date, check_time: check_time, blood_sugar: blood_sugar} }).code(200);
 }
 
 function addHours(date, hours) {
@@ -161,6 +266,7 @@ async function getAllSugarBlood(request, h){
       }));
 
     return h.response({
+        error: false,
         status: "Success",
         data: simplifiedSugarBlood
         // user: user,
@@ -178,6 +284,7 @@ async function getProfile(request, h){
         };
 
     return h.response({
+        error: false,
         status: "Success",
         data: emailFullName
         // user: user,
@@ -196,7 +303,7 @@ async function postBloodPressure(request, h){
         [id, user.user_id, check_date, check_time, sistolik, distolik]
     );
 
-    return h.response({ message: 'success', user }).code(200);
+    return h.response({error: false, message: 'success', data: {check_date: check_date, check_time: check_time, sistolik: sistolik, distolik: distolik} }).code(201);
 }
 
 async function getAllBloodPressure(request, h){
@@ -211,6 +318,7 @@ async function getAllBloodPressure(request, h){
       }));
 
     return h.response({
+        error: false,
         status: "Success",
         data: bloodPressure,
         // user: user,
@@ -225,7 +333,10 @@ module.exports = {
     getAllSugarBlood,
     getDiseaseDetail,
     skinDetection,
+    // acneDetection,
     getProfile,
     postBloodPressure,
-    getAllBloodPressure
+    getAllBloodPressure,
+    // getAllSkinDetection,
+    // getAllAcneDetection
 }

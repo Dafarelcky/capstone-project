@@ -3,7 +3,7 @@ require('dotenv').config();
 const Hapi = require('@hapi/hapi');
 const routes = require('../server/routes');
 const Jwt = require('@hapi/jwt');
-const loadModel = require("../services/loadModel");
+const {loadModel, loadGModel} = require("../services/loadModel");
 const InputError = require("../exceptions/InputError");
 
 (async () => {
@@ -27,7 +27,7 @@ const InputError = require("../exceptions/InputError");
             sub: false, 
             nbf: true,
             exp: true,
-            maxAgeSec: 14400, 
+            maxAgeSec: 604800, 
             timeSkewSec: 15
         },
         validate: (artifacts, request, h) => {
@@ -40,8 +40,19 @@ const InputError = require("../exceptions/InputError");
 
     server.auth.default('jwt');
 
+    // skinModel
     const model = await loadModel("file://model/model.json");
     server.app.skin_model = model;
+
+    // acneModel
+    // try {
+    //     const acneModelUrl = "https://storage.googleapis.com/capstone-self-medic/acneModel/model.json";
+    //     const acneModel = await loadGModel(acneModelUrl);
+    //     server.app.acne_model = acneModel;
+    // } catch (error) {
+    //     console.error("Error loading model:", error);
+    //     // process.exit(1);
+    // }
 
 
     server.route(routes);
